@@ -1,163 +1,146 @@
-//http://www.youtube.com/user/thecplusplusguy
-//The Box2D main program with SDL
-#include <iostream>
-#include <SDL.h>
-#include <SDL_image.h>
-#include <GL/gl.h>
-#include <GL/glu.h>
-#include <Box2D/Box2D.h>
+#include "Box2D/Box2D.h"
 
-const int WIDTH=640;
-const int HEIGHT=480;
-const float M2P=20;
-const float P2M=1/M2P;
-b2World* world;
-SDL_Surface* screen;
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
+#include <SDL2/SDL_ttf.h>
+#define GLEW_STATIC
+#include <GL/glew.h>
 
-void putPixel(SDL_Surface* dest,int x,int y,int r,int g,int b)
-{
-//	std::cout << x << " " << y << std::endl;
-	if(x>=0 && x<dest->w && y>=0 && y<dest->h)
-		((Uint32*)dest->pixels)[y*dest->pitch/4+x]=SDL_MapRGB(dest->format,r,g,b);
-}
+#include <stdio.h>
 
-void swapValue(int& a,int& b)
-{
-	int tmp=a;
-	a=b;
-	b=tmp;
-}
+constexpr unsigned int WINDOW_WIDTH_PIXELS = 600;
+constexpr float WINDOW_WIDTH = 10.0;
+constexpr unsigned int PIXELS_PER_UNIT = WINDOW_WIDTH_PIXELS / WINDOW_WIDTH;
+constexpr float BOX_WIDTH = 1.0;
+constexpr int GRAVITY = -5.0;
+constexpr uint32 VELOCITY_ITERATIONS = 6;
+constexpr uint32 POSITION_ITERATIONS = 2;
 
-void drawLine(SDL_Surface* dest,int x0,int y0,int x1,int y1)
-{
-	int tmp;
-	bool step;
-	
-	step=abs(y1-y0)>abs(x1-x0);
-	if(step)
-	{
-		swapValue(x0,y0);
-		swapValue(x1,y1);
-	}
-	
-	if(x0>x1)
-	{
-		swapValue(x1,x0);
-		swapValue(y1,y0);
-	}
-	float error=0.0;
-	float y=y0;
-	float roundError=(float)abs(y1-y0)/(x1-x0);
-	int ystep=(y1>y0 ? 1 : -1); 
-	for(int i=x0;i<x1;i++)
-	{
-		if(step)
-			putPixel(dest,y,i,255,255,255);
-		else
-			putPixel(dest,i,y,255,255,255);
-		error+=roundError;
-		if(error>=0.5)
-		{
-			y+=ystep;
-			error-=1;
-		}
-	}
-}
+int main() {
 
-void rotateTranslate(b2Vec2& vector,const b2Vec2& center,float angle)
-{
-	b2Vec2 tmp;
-	tmp.x=vector.x*cos(angle)-vector.y*sin(angle);
-	tmp.y=vector.x*sin(angle)+vector.y*cos(angle);
-	vector=tmp+center;
-}
+    // Box2D
+    // {
+        b2World world(b2Vec2(0.0f, GRAVITY));
 
+        // Ground
+        {
+            b2BodyDef groundBodyDef;
+            groundBodyDef.position.Set(0.0f, 1.0);
+            b2Body* groundBody = world.CreateBody(&groundBodyDef);
+            b2PolygonShape polygonShape;
+            polygonShape.SetAsBox(100.0 * WINDOW_WIDTH, 1.0);
+            b2FixtureDef fixtureDef;
+            fixtureDef.shape = &polygonShape;
+            fixtureDef.density = 0.0f;
+            fixtureDef.restitution = 0.5f;
+            groundBody->CreateFixture(&fixtureDef);
+        }
 
-b2Body* addRect(int x,int y,int w,int h,bool dyn=true)
-{
-	b2BodyDef bodydef;
-	bodydef.position.Set(x*P2M,y*P2M);
-	if(dyn)
-		bodydef.type=b2_dynamicBody;
-	b2Body* body=world->CreateBody(&bodydef);
-	
-	b2PolygonShape shape;
-	shape.SetAsBox(P2M*w/2,P2M*h/2);
-	
-	b2FixtureDef fixturedef;
-	fixturedef.shape=&shape;
-	fixturedef.density=1.0;
-	body->CreateFixture(&fixturedef);
-	
-}
+        b2Body* body;
+        {
+            // Falling box
+            b2BodyDef bodyDef;
+            bodyDef.type = b2_dynamicBody;
+            bodyDef.position.Set(0.0f, WINDOW_WIDTH);
+            bodyDef.angle = 3.1415f / 3.0;
+            body = world.CreateBody(&bodyDef);
+            b2PolygonShape dynamicBox;
+            dynamicBox.SetAsBox(BOX_WIDTH, BOX_WIDTH);
+            b2FixtureDef fixtureDef;
+            fixtureDef.shape = &dynamicBox;
+            fixtureDef.density = 1.0f;
+            fixtureDef.friction = 0.3f;
+            fixtureDef.restitution = 0.5f;
+            body->CreateFixture(&fixtureDef);
+        }
+    // }
 
-void drawSquare(b2Vec2* points,b2Vec2 center,float angle)
-{
-	for(int i=0;i<4;i++)
-		drawLine(screen,points[i].x*M2P,points[i].y*M2P,points[(i+1)>3 ? 0 : (i+1)].x*M2P,points[(i+1)>3 ? 0 : (i+1)].y*M2P);
-}
+    // SDL
+    // {
+        SDL_Event event;
+        SDL_Rect rect;
+        SDL_Renderer *renderer;
+        SDL_Window *window;
 
+        SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO);
+        SDL_CreateWindowAndRenderer(WINDOW_WIDTH_PIXELS, WINDOW_WIDTH_PIXELS, 0, &window, &renderer);
+        SDL_SetWindowTitle(window, "arrow keys: move");
+        rect.w = BOX_WIDTH * PIXELS_PER_UNIT;
+        rect.h = BOX_WIDTH * PIXELS_PER_UNIT;
+    // }
 
-void init()
-{
-	world=new b2World(b2Vec2(0.0,9.81),1);
-	addRect(WIDTH/2,HEIGHT-50,WIDTH,30,false);
-}
+    int quit = 0;
+    uint64_t loops = 0;
+    uint32 current_time, last_time;
+    double step;
+    last_time = SDL_GetTicks();
 
-void display()
-{
-	SDL_FillRect(screen,NULL,0);
-	b2Body* tmp=world->GetBodyList();
-	b2Vec2 points[4];
-	while(tmp)
-	{
-		for(int i=0;i<4;i++)
-		{
-			points[i]=((b2PolygonShape*)tmp->GetFixtureList()->GetShape())->GetVertex(i);
-			rotateTranslate(points[i],tmp->GetWorldCenter(),tmp->GetAngle());
-		}
-		drawSquare(points,tmp->GetWorldCenter(),tmp->GetAngle());
-		tmp=tmp->GetNext();
-	}
-}
+    while (!quit) {
+        while (SDL_PollEvent(&event) == 1) {
+            if (event.type == SDL_QUIT) {
+                quit = 1;
+            } else if (event.type == SDL_KEYDOWN) {
+                switch (event.key.keysym.sym) {
+                    case SDLK_LEFT:
+                        //speed_x = -1;
+                        break;
+                    case SDLK_RIGHT:
+                        //speed_x = 1;
+                        break;
+                    case SDLK_UP:
+                        //speed_y = -1;
+                        break;
+                    case SDLK_DOWN:
+                        //speed_y = 1;
+                        break;
+                    default:
+                        break;
+                }
+            } else if (event.type == SDL_KEYUP) {
+                switch (event.key.keysym.sym) {
+                    case SDLK_LEFT:
+                        //speed_x = 0;
+                        break;
+                    case SDLK_RIGHT:
+                        //speed_x = 0;
+                        break;
+                    case SDLK_UP:
+                        //speed_y = 0;
+                        break;
+                    case SDLK_DOWN:
+                        //speed_y = 0;
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+        current_time = SDL_GetTicks();
+        if (current_time != last_time) {
+            step = (current_time - last_time) / 1000.0;
+            last_time = current_time;
 
-int main(int argc,char** argv)
-{
-	SDL_Init(SDL_INIT_EVERYTHING);
-	screen=SDL_SetVideoMode(640,480,32,SDL_SWSURFACE);
-	Uint32 start;
-	SDL_Event event;
-	bool running=true;
-	init();
-	while(running)
-	{
-		start=SDL_GetTicks();
-		while(SDL_PollEvent(&event))
-		{
-			switch(event.type)
-			{
-				case SDL_QUIT:
-					running=false;
-					break;
-				case SDL_KEYDOWN:
-					switch(event.key.keysym.sym)
-					{
-						case SDLK_ESCAPE:
-							running=false;
-							break;
-					}
-					break;
-				case SDL_MOUSEBUTTONDOWN:
-					addRect(event.button.x,event.button.y,20,20,true);
-					break;
-					
-			}
-		}
-		display();
-		world->Step(1.0/30.0,8,3);	//update
-		SDL_Flip(screen);
-		if(1000.0/30>SDL_GetTicks()-start)
-			SDL_Delay(1000.0/30-(SDL_GetTicks()-start));
-	}
-	SDL_Quit();
+            world.Step(step, VELOCITY_ITERATIONS, POSITION_ITERATIONS);
+            b2Vec2 position = body->GetPosition();
+            float32 angle = body->GetAngle();
+            printf("%ju %f %4.2f %4.2f %4.2f\n", (uintmax_t)loops, step, position.x, position.y, angle);
+
+            rect.x = position.x * PIXELS_PER_UNIT + (WINDOW_WIDTH_PIXELS / 2);
+            rect.y = WINDOW_WIDTH_PIXELS - position.y * PIXELS_PER_UNIT;
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
+            SDL_RenderClear(renderer);
+            SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+            SDL_RenderFillRect(renderer, &rect);
+            SDL_RenderPresent(renderer);
+
+            loops++;
+            //if (loops > 10000)
+                //quit = true;
+        }
+    }
+
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    return EXIT_SUCCESS;
 }
